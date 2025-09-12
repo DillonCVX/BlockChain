@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Event Visualization</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Navbar -->
+  <header class="navbar">
+    <div class="logo">Eth Event Scanner</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="subscribe.html">Subscribe</a>
+      <a href="events.html" class="active">Events</a>
+    </nav>
+  </header>
+
+  <!-- Events Table -->
+  <main>
+    <div class="table-container">
+      <h2>Detected Ethereum Events</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Block</th>
+            <th>Tx Hash</th>
+            <th>Event Name</th>
+            <th>Arguments</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>123456</td>
+            <td>0xabc123...</td>
+            <td><span class="event-type event-Transfer">Transfer</span></td>
+            <td>from: 0x111... → to: 0x222... (1000)</td>
+          </tr>
+          <tr>
+            <td colspan="4" class="placeholder">Events will appear here in real-time.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    &copy; 2025 Ethereum Event Scanner | Built for BMIS2003 Assignment
+  </footer>
+<!-- include socket.io client -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+<script>
+  const socket = io('http://localhost:4000');
+  const tbody = document.querySelector('table tbody');
+
+  // Fetch historical events once on load
+  fetch('http://localhost:4000/events').then(r=>r.json()).then(list => {
+    // show newest first
+    const sorted = (list || []).sort((a,b) => b.timestamp - a.timestamp);
+    sorted.forEach(renderEventRow);
+  });
+
+  socket.on('connect', ()=> console.log('socket connected', socket.id));
+  socket.on('event', (ev) => {
+    renderEventRow(ev, true); // add to top
+  });
+
+  function renderEventRow(ev, insertTop=false){
+    const tr = document.createElement('tr');
+    const argsText = ev.decoded ? JSON.stringify(ev.decoded.args) : ev.data;
+    tr.innerHTML = `
+      <td>${ev.blockNumber}</td>
+      <td><a href="#" onclick="navigator.clipboard.writeText('${ev.transactionHash}')">${ev.transactionHash.slice(0,12)}...</a></td>
+      <td>${ev.decoded ? ev.decoded.name : 'raw'}</td>
+      <td>${escapeHtml(argsText)}</td>
+    `;
+    // Insert top or append
+    const placeholderRow = tbody.querySelector('.placeholder');
+    if(insertTop){
+      tbody.insertBefore(tr, tbody.firstChild);
+      if(placeholderRow) placeholderRow.remove();
+    } else {
+      if(placeholderRow) {
+        placeholderRow.remove();
+        tbody.appendChild(tr);
+      } else {
+        tbody.appendChild(tr);
+      }
+    }
+  }
+
+  function escapeHtml(str){
+    if(!str) return '';
+    return str.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  }
+</script>
+</body>
+</html>

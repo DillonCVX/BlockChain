@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Subscribe to Events</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Navbar -->
+  <header class="navbar">
+    <div class="logo">Eth Event Scanner</div>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="subscribe.html" class="active">Subscribe</a>
+      <a href="events.html">Events</a>
+    </nav>
+  </header>
+
+  <!-- Subscription Form -->
+  <main>
+    <div class="form-container">
+      <h2>Subscribe to Smart Contract Events</h2>
+      <div class="card">
+        <form>
+          <label for="contractAddress">Contract Address</label>
+          <input type="text" id="contractAddress" placeholder="0x123...">
+
+          <label for="eventSignature">Event Signature</label>
+          <input type="text" id="eventSignature" placeholder="Transfer(address,address,uint256)">
+
+          <label for="fromBlock">From Block</label>
+          <input type="number" id="fromBlock" placeholder="Latest or Block Number">
+
+          <button type="submit" class="btn">Start Subscription</button>
+        </form>
+        <div class="status-placeholder">Subscription status will be displayed here.</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    &copy; 2025 Ethereum Event Scanner | Built for BMIS2003 Assignment
+  </footer>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
+<script>
+  const form = document.querySelector('form');
+  const statusPlaceholder = document.querySelector('.status-placeholder');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const contractAddress = document.getElementById('contractAddress').value.trim();
+    const eventSignature = document.getElementById('eventSignature').value.trim();
+    const fromBlockRaw = document.getElementById('fromBlock').value.trim();
+    const fromBlock = fromBlockRaw === '' ? null : Number(fromBlockRaw);
+
+    if(!contractAddress){
+      statusPlaceholder.textContent = 'Contract address required.';
+      return;
+    }
+    statusPlaceholder.textContent = 'Creating subscription...';
+
+    try{
+      const payload = { contractAddress, eventSignature, fromBlock };
+      // If you have ABI in a text box you could include abi: JSON.parse(abiText)
+      const res = await fetch('http://localhost:4000/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if(data.id){
+        statusPlaceholder.innerHTML = `Subscribed! ID: ${data.id} — now go to <a href="events.html">Events</a>`;
+      } else {
+        statusPlaceholder.textContent = 'Subscription failed: ' + JSON.stringify(data);
+      }
+    }catch(err){
+      statusPlaceholder.textContent = 'Error: ' + err.message;
+    }
+  });
+</script>
+
+</body>
+</html>
