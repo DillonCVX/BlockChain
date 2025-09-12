@@ -1,12 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Event Visualization</title>
-  <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <title>Detected Events</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; background:#f8fafc; color:#0f172a; }
+    header.navbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#0f172a; color:#fff; }
+    header.navbar .logo { font-weight:700; }
+    header.navbar nav a { color:#cbd5e1; margin-left:12px; text-decoration:none; }
+    main { max-width:1100px; margin:20px auto; padding:0 16px; }
+    .controls { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+    input[type=text] { padding:8px; border-radius:6px; border:1px solid #e2e8f0; }
+    .btn { background:#0ea5e9; color:#fff; padding:8px 10px; border-radius:6px; border:0; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 8px 24px rgba(12,12,12,0.06); }
+    th, td { padding:10px 12px; border-bottom:1px solid #eef2f7; text-align:left; font-size:14px; }
+    th { background:#f1f5f9; color:#0f172a; font-weight:700; }
+    tbody tr:hover { background:#f8fafc; }
+    .small { font-size:13px; color:#475569; }
+    .placeholder { text-align:center; padding:18px; color:#64748b; }
+  </style>
 </head>
 <body>
-  <!-- Navbar -->
   <header class="navbar">
     <div class="logo">Eth Event Scanner</div>
     <nav>
@@ -16,84 +32,137 @@
     </nav>
   </header>
 
-  <!-- Events Table -->
   <main>
-    <div class="table-container">
-      <h2>Detected Ethereum Events</h2>
-      <table>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2>Detected Events</h2>
+      <div>
+        <button id="exportBtn" class="btn">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input id="filterAddress" type="text" placeholder="Filter by contract address (0x...)">
+      <input id="filterEvent" type="text" placeholder="Filter by event name (Ping, Transfer)">
+      <button id="applyFilter" class="btn">Apply</button>
+      <button id="clearFilter" class="btn" style="background:#94a3b8">Clear</button>
+    </div>
+
+    <div style="overflow:auto">
+      <table id="eventsTable">
         <thead>
           <tr>
             <th>Block</th>
             <th>Tx Hash</th>
-            <th>Event Name</th>
-            <th>Arguments</th>
+            <th>Event</th>
+            <th>Args / Data</th>
+            <th>Contract</th>
+            <th>Time</th>
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>123456</td>
-            <td>0xabc123...</td>
-            <td><span class="event-type event-Transfer">Transfer</span></td>
-            <td>from: 0x111... → to: 0x222... (1000)</td>
-          </tr>
-          <tr>
-            <td colspan="4" class="placeholder">Events will appear here in real-time.</td>
-          </tr>
+          <tr class="placeholder"><td colspan="6" class="placeholder">Loading events...</td></tr>
         </tbody>
       </table>
     </div>
   </main>
 
-  <!-- Footer -->
-  <footer>
-    &copy; 2025 Ethereum Event Scanner | Built for BMIS2003 Assignment
-  </footer>
-<!-- include socket.io client -->
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-<script>
-  const socket = io('http://localhost:4000');
-  const tbody = document.querySelector('table tbody');
+  <footer style="text-align:center;padding:12px;color:#64748b;">&copy; 2025 Ethereum Event Scanner</footer>
 
-  // Fetch historical events once on load
-  fetch('http://localhost:4000/events').then(r=>r.json()).then(list => {
-    // show newest first
-    const sorted = (list || []).sort((a,b) => b.timestamp - a.timestamp);
-    sorted.forEach(renderEventRow);
-  });
+  <!-- Socket.IO client -->
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
-  socket.on('connect', ()=> console.log('socket connected', socket.id));
-  socket.on('event', (ev) => {
-    renderEventRow(ev, true); // add to top
-  });
+  <script>
+    const API_BASE = 'http://localhost:4000';
+    const socket = io(API_BASE, { transports: ['websocket','polling'] });
 
-  function renderEventRow(ev, insertTop=false){
-    const tr = document.createElement('tr');
-    const argsText = ev.decoded ? JSON.stringify(ev.decoded.args) : ev.data;
-    tr.innerHTML = `
-      <td>${ev.blockNumber}</td>
-      <td><a href="#" onclick="navigator.clipboard.writeText('${ev.transactionHash}')">${ev.transactionHash.slice(0,12)}...</a></td>
-      <td>${ev.decoded ? ev.decoded.name : 'raw'}</td>
-      <td>${escapeHtml(argsText)}</td>
-    `;
-    // Insert top or append
-    const placeholderRow = tbody.querySelector('.placeholder');
-    if(insertTop){
-      tbody.insertBefore(tr, tbody.firstChild);
-      if(placeholderRow) placeholderRow.remove();
-    } else {
-      if(placeholderRow) {
-        placeholderRow.remove();
-        tbody.appendChild(tr);
-      } else {
+    const tbody = document.querySelector('#eventsTable tbody');
+    const exportBtn = document.getElementById('exportBtn');
+    const filterAddress = document.getElementById('filterAddress');
+    const filterEvent = document.getElementById('filterEvent');
+    const applyFilter = document.getElementById('applyFilter');
+    const clearFilter = document.getElementById('clearFilter');
+
+    let events = []; // local cache
+
+    function escapeHtml(s){ if(s === null || s === undefined) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    function renderTable(filtered){
+      tbody.innerHTML = '';
+      const list = filtered || events.slice().sort((a,b)=>b.timestamp - a.timestamp);
+      if(list.length === 0){
+        tbody.innerHTML = '<tr class="placeholder"><td colspan="6">No events found.</td></tr>';
+        return;
+      }
+      for(const ev of list){
+        const argsText = ev.decoded ? JSON.stringify(ev.decoded.args) : ev.data;
+        const evName = ev.decoded ? ev.decoded.name : 'raw';
+        const time = new Date(ev.timestamp).toLocaleString();
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${ev.blockNumber}</td>
+                        <td><a href="#" onclick="navigator.clipboard.writeText('${ev.transactionHash}');return false;">${ev.transactionHash.slice(0,12)}…</a></td>
+                        <td>${escapeHtml(evName)}</td>
+                        <td><pre style="white-space:pre-wrap;margin:0;font-family:monospace">${escapeHtml(argsText)}</pre></td>
+                        <td>${escapeHtml(ev.address)}</td>
+                        <td class="small">${time}</td>`;
         tbody.appendChild(tr);
       }
     }
-  }
 
-  function escapeHtml(str){
-    if(!str) return '';
-    return str.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-  }
-</script>
+    async function loadEvents(){
+      try {
+        const r = await fetch(API_BASE + '/events');
+        const j = await r.json();
+        events = Array.isArray(j) ? j : [];
+        renderTable();
+      } catch(err){
+        tbody.innerHTML = '<tr class="placeholder"><td colspan="6">Failed to load events: '+escapeHtml(err.message) +'</td></tr>';
+      }
+    }
+
+    // live updates
+    socket.on('connect', ()=> console.log('socket connected', socket.id));
+    socket.on('event', (ev) => {
+      // avoid duplicates by id if backend is correct — still check locally
+      if(!events.find(e => e.id === ev.id)){
+        events.push(ev);
+        renderTable();
+      }
+    });
+
+    // filtering
+    function applyFilters(){
+      const addr = (filterAddress.value || '').trim().toLowerCase();
+      const name = (filterEvent.value || '').trim().toLowerCase();
+      const f = events.filter(ev => {
+        if(addr && (!ev.address || ev.address.toLowerCase().indexOf(addr) === -1)) return false;
+        if(name){
+          const en = ev.decoded ? ev.decoded.name.toLowerCase() : 'raw';
+          if(en.indexOf(name) === -1) return false;
+        }
+        return true;
+      }).sort((a,b)=>b.timestamp - a.timestamp);
+      renderTable(f);
+    }
+    applyFilter.addEventListener('click', applyFilters);
+    clearFilter.addEventListener('click', ()=>{ filterAddress.value=''; filterEvent.value=''; renderTable(); });
+
+    // CSV export
+    exportBtn.addEventListener('click', ()=> {
+      const rows = [['Block','TxHash','Event','Args','Address','Time']];
+      for(const ev of events.slice().sort((a,b)=>b.timestamp - a.timestamp)){
+        const argsText = ev.decoded ? JSON.stringify(ev.decoded.args) : ev.data;
+        const time = new Date(ev.timestamp).toLocaleString();
+        rows.push([ev.blockNumber, ev.transactionHash, ev.decoded ? ev.decoded.name : 'raw', argsText, ev.address, time]);
+      }
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'events.csv'; a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // initial load
+    loadEvents();
+  </script>
 </body>
 </html>

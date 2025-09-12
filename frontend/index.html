@@ -1,36 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Ethereum Event Scanner - Home</title>
-  <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <title>Eth Event Scanner — Home</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; padding:0; }
+    header.navbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#0f172a; color:#fff; }
+    header.navbar .logo { font-weight:700; }
+    header.navbar nav a { color:#cbd5e1; margin-left:12px; text-decoration:none; }
+    main { padding:28px; max-width:1000px; margin:0 auto; }
+    .card { background:#fff; border-radius:8px; padding:18px; box-shadow:0 6px 18px rgba(12,12,12,0.06); }
+    footer { text-align:center; padding:16px; color:#666; font-size:13px; }
+    .btn { background:#0ea5e9; color:#fff; padding:8px 12px; border-radius:6px; border:0; cursor:pointer; }
+  </style>
 </head>
 <body>
-  <!-- Navbar -->
   <header class="navbar">
     <div class="logo">Eth Event Scanner</div>
     <nav>
-      <a href="index.html" class="active">Home</a>
+      <a href="index.html">Home</a>
       <a href="subscribe.html">Subscribe</a>
       <a href="events.html">Events</a>
     </nav>
   </header>
 
-  <!-- Hero Section -->
   <main>
-    <section class="hero">
-      <h1>Real-Time Ethereum Event Scanner</h1>
-      <p>Subscribe to smart contract events, monitor them in real time, and explore historical logs with ease.</p>
-      <div class="cta-buttons">
-        <a href="subscribe.html" class="btn">Start Subscribing</a>
-        <a href="events.html" class="btn secondary">View Events</a>
+    <div class="card">
+      <h1>Ethereum Event Scanner</h1>
+      <p>Frontend served on <code>http://localhost:8080</code>. Backend API at <code>http://localhost:4000</code>.</p>
+
+      <h3>Quick Test</h3>
+      <ol>
+        <li>Open <a href="subscribe.html">Subscribe</a> and create a subscription (paste contract address and ABI or event signature).</li>
+        <li>Then open <a href="events.html">Events</a> to watch live and historical events.</li>
+      </ol>
+
+      <div style="margin-top:12px">
+        <a class="btn" href="subscribe.html">Go Subscribe</a>
+        <a class="btn" href="events.html" style="margin-left:8px">Open Events</a>
       </div>
-    </section>
+    </div>
   </main>
 
-  <!-- Footer -->
-  <footer>
-    &copy; 2025 Ethereum Event Scanner | Built for BMIS2003 Assignment
-  </footer>
+  <footer>&copy; 2025 Ethereum Event Scanner | BMIS2003 Assignment</footer>
 </body>
 </html>

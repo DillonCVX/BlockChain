@@ -1,12 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
   <title>Subscribe to Events</title>
-  <link rel="stylesheet" href="style.css">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; background:#f3f4f6; color:#0f172a; }
+    header.navbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#0f172a; color:#fff; }
+    header.navbar .logo { font-weight:700; }
+    header.navbar nav a { color:#cbd5e1; margin-left:12px; text-decoration:none; }
+    main { max-width:980px; margin:24px auto; padding:0 16px; }
+    .card { background:#fff; border-radius:8px; padding:18px; box-shadow:0 6px 18px rgba(12,12,12,0.06); }
+    label { display:block; margin-top:10px; font-weight:600; }
+    input[type=text], input[type=number], textarea { width:100%; padding:8px; border-radius:6px; border:1px solid #e5e7eb; margin-top:6px; box-sizing:border-box; }
+    textarea { min-height:120px; font-family:monospace; font-size:13px; }
+    .btn { background:#0ea5e9; color:#fff; padding:10px 14px; border-radius:6px; border:0; cursor:pointer; margin-top:12px; }
+    .status { margin-top:8px; color:#065f46; }
+    .error { color:#b91c1c; }
+    .subscriptions { margin-top:18px; border-top:1px dashed #e6eef5; padding-top:12px; }
+    .sub-item { padding:8px 6px; border-bottom:1px solid #f1f5f9; }
+    .small { font-size:13px; color:#475569; }
+    .help { font-size:13px; color:#64748b; margin-top:6px; }
+    a.link { color:#0ea5e9; text-decoration:none; }
+  </style>
 </head>
 <body>
-  <!-- Navbar -->
   <header class="navbar">
     <div class="logo">Eth Event Scanner</div>
     <nav>
@@ -16,69 +35,103 @@
     </nav>
   </header>
 
-  <!-- Subscription Form -->
   <main>
-    <div class="form-container">
+    <div class="card">
       <h2>Subscribe to Smart Contract Events</h2>
-      <div class="card">
-        <form>
-          <label for="contractAddress">Contract Address</label>
-          <input type="text" id="contractAddress" placeholder="0x123...">
 
-          <label for="eventSignature">Event Signature</label>
-          <input type="text" id="eventSignature" placeholder="Transfer(address,address,uint256)">
+      <form id="subscribeForm">
+        <label for="contractAddress">Contract Address</label>
+        <input id="contractAddress" type="text" placeholder="0x123...">
 
-          <label for="fromBlock">From Block</label>
-          <input type="number" id="fromBlock" placeholder="Latest or Block Number">
+        <label for="eventSignature">Event Signature (optional)</label>
+        <input id="eventSignature" type="text" placeholder="Transfer(address,address,uint256) or Ping(address,string)">
 
-          <button type="submit" class="btn">Start Subscription</button>
-        </form>
-        <div class="status-placeholder">Subscription status will be displayed here.</div>
+        <label for="fromBlock">From Block (optional)</label>
+        <input id="fromBlock" type="number" placeholder="0 (scan from genesis) or leave empty">
+
+        <label for="abiText">ABI (optional) — paste JSON ABI to enable decoding of events</label>
+        <textarea id="abiText" placeholder='[ { "anonymous":false, "inputs":[...], "name":"Ping", "type":"event" }, ... ]'></textarea>
+
+        <button class="btn" id="startBtn" type="submit">Start Subscription</button>
+      </form>
+
+      <div id="status" class="status">Subscription status will appear here.</div>
+
+      <div class="subscriptions" id="subscriptionsBlock">
+        <h3>Existing Subscriptions</h3>
+        <div id="subsList" class="small">Loading...</div>
       </div>
+
+      <p class="help">How to use: paste the deployed contract address (deployed to Ganache). If you paste the ABI, the backend will decode event arguments. If you only supply an event signature, the scanner will filter by topic0 but cannot decode arguments.</p>
     </div>
   </main>
 
-  <!-- Footer -->
-  <footer>
-    &copy; 2025 Ethereum Event Scanner | Built for BMIS2003 Assignment
-  </footer>
-<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
-<script>
-  const form = document.querySelector('form');
-  const statusPlaceholder = document.querySelector('.status-placeholder');
+  <footer style="text-align:center;padding:14px;color:#64748b;">&copy; 2025 Ethereum Event Scanner</footer>
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const contractAddress = document.getElementById('contractAddress').value.trim();
-    const eventSignature = document.getElementById('eventSignature').value.trim();
-    const fromBlockRaw = document.getElementById('fromBlock').value.trim();
-    const fromBlock = fromBlockRaw === '' ? null : Number(fromBlockRaw);
+  <!-- Ethers (only used client-side for simple validation) -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script>
+    const API_BASE = 'http://localhost:4000';
+    const form = document.getElementById('subscribeForm');
+    const status = document.getElementById('status');
+    const subsList = document.getElementById('subsList');
 
-    if(!contractAddress){
-      statusPlaceholder.textContent = 'Contract address required.';
-      return;
-    }
-    statusPlaceholder.textContent = 'Creating subscription...';
-
-    try{
-      const payload = { contractAddress, eventSignature, fromBlock };
-      // If you have ABI in a text box you could include abi: JSON.parse(abiText)
-      const res = await fetch('http://localhost:4000/subscribe', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if(data.id){
-        statusPlaceholder.innerHTML = `Subscribed! ID: ${data.id} — now go to <a href="events.html">Events</a>`;
-      } else {
-        statusPlaceholder.textContent = 'Subscription failed: ' + JSON.stringify(data);
+    async function refreshSubscriptions(){
+      try {
+        const r = await fetch(API_BASE + '/subscriptions');
+        const json = await r.json();
+        if(!Array.isArray(json) || json.length===0){
+          subsList.innerHTML = '<div class="small">No subscriptions yet.</div>';
+          return;
+        }
+        subsList.innerHTML = '';
+        json.forEach(s=>{
+          const d = document.createElement('div');
+          d.className = 'sub-item';
+          d.innerHTML = `<div><strong>Address:</strong> ${s.contractAddress}</div>
+                         <div class="small"><strong>ID:</strong> ${s.id} &nbsp; <strong>lastBlock:</strong> ${s.lastProcessedBlock ?? 'N/A'}</div>`;
+          subsList.appendChild(d);
+        });
+      } catch(err){
+        subsList.innerHTML = '<div class="error">Failed to load subscriptions: '+err.message+'</div>';
       }
-    }catch(err){
-      statusPlaceholder.textContent = 'Error: ' + err.message;
     }
-  });
-</script>
 
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      status.classList.remove('error');
+      status.textContent = 'Creating subscription...';
+      const contractAddress = document.getElementById('contractAddress').value.trim();
+      const eventSignature = document.getElementById('eventSignature').value.trim() || null;
+      const fromBlockRaw = document.getElementById('fromBlock').value.trim();
+      const fromBlock = fromBlockRaw === '' ? null : Number(fromBlockRaw);
+      let abi = null;
+      const abiRaw = document.getElementById('abiText').value.trim();
+      if(abiRaw){
+        try { abi = JSON.parse(abiRaw); }
+        catch(err){ status.classList.add('error'); status.textContent = 'ABI is not valid JSON: ' + err.message; return; }
+      }
+      if(!contractAddress){
+        status.classList.add('error'); status.textContent = 'Contract address is required.'; return;
+      }
+      try {
+        const payload = { contractAddress, eventSignature, fromBlock, abi };
+        const res = await fetch(API_BASE + '/subscribe', {
+          method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if(!res.ok){ status.classList.add('error'); status.textContent = 'Subscribe failed: ' + (data.error || JSON.stringify(data)); return; }
+        status.textContent = 'Subscribed! ID: ' + (data.id || 'unknown') + '. Go to Events page to view results.';
+        // refresh subs
+        await refreshSubscriptions();
+      } catch(err){
+        status.classList.add('error');
+        status.textContent = 'Failed to fetch backend: ' + err.message;
+      }
+    });
+
+    // load on page
+    refreshSubscriptions();
+  </script>
 </body>
 </html>

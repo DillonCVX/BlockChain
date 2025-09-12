@@ -1,12 +1,14 @@
 // backend/index.js
-// Minimal Ethereum event scanner backend using plain JSON file persistence (no lowdb).
-// Dependencies: express, cors, ethers, socket.io, uuid
+// Minimal Ethereum Event Scanner backend using plain JSON file persistence.
+//
+// Dependencies:
+//   npm install express cors ethers socket.io uuid
 //
 // Usage:
-//  npm install express cors ethers socket.io uuid
-//  node index.js
-//
-// Notes: Make sure Ganache or an RPC endpoint with websocket is available (ws://127.0.0.1:8545)
+//   Set env vars if needed:
+//     WS_PROVIDER (e.g. ws://127.0.0.1:7546)
+//     HTTP_PROVIDER (e.g. http://127.0.0.1:7546)
+//   node index.js
 
 const express = require('express');
 const http = require('http');
@@ -20,7 +22,7 @@ const fsSync = require('fs');
 
 const DB_PATH = path.join(__dirname, 'db.json');
 
-// ensure db file exists with defaults
+// --- DB helpers (ensure file exists, read/write) ---
 async function ensureDb(){
   try {
     if(!fsSync.existsSync(DB_PATH)){
@@ -60,11 +62,11 @@ async function writeDb(obj){
 
 // initialize DB memory
 let db = { subscriptions: [], events: [] };
-
-(async function init(){
+(async function initDbNow(){
   db = await ensureDb();
 })();
 
+// --- App setup ---
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -72,20 +74,44 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = socketio(server, { cors: { origin: '*' } });
 
-// WebSocket provider (prefer ws for real-time)
-const WS_URL = process.env.WS_PROVIDER || 'ws://127.0.0.1:8545';
+// --- Provider init (safe) ---
+const HTTP_URL = process.env.HTTP_PROVIDER || 'http://127.0.0.1:7546';
+const WS_URL = process.env.WS_PROVIDER || 'ws://127.0.0.1:7546';
+
 let provider;
-try {
-  provider = new ethers.providers.WebSocketProvider(WS_URL);
-} catch(e) {
-  console.warn('WebSocket provider init failed, falling back to HTTP:', e.message || e);
-  provider = new ethers.providers.JsonRpcProvider(process.env.HTTP_PROVIDER || 'http://127.0.0.1:8545');
+
+function useHttpProvider() {
+  console.warn('Using HTTP provider (no realtime). URL=', HTTP_URL);
+  provider = new ethers.providers.JsonRpcProvider(HTTP_URL);
 }
 
+// Try to initialize WebSocket provider with graceful fallback & handlers
+(function initProvider(){
+  try {
+    console.log('Attempting WebSocket provider at', WS_URL);
+    provider = new ethers.providers.WebSocketProvider(WS_URL);
+
+    // attach handlers so async websocket errors won't crash Node
+    if (provider && provider._websocket) {
+      provider._websocket.on('error', (err) => {
+        console.warn('WebSocket error:', err && err.message ? err.message : err);
+        try { useHttpProvider(); } catch(e) { console.error('HTTP fallback failed', e); }
+      });
+      provider._websocket.on('close', (code, reason) => {
+        console.warn('WebSocket closed. code=', code, 'reason=', reason && reason.toString ? reason.toString() : reason);
+        try { useHttpProvider(); } catch(e) { console.error('HTTP fallback failed', e); }
+      });
+    }
+  } catch (e) {
+    console.warn('WebSocket provider init failed:', e && e.message ? e.message : e);
+    useHttpProvider();
+  }
+})();
+
+// --- Helpers ---
 const eventId = (log) => `${log.transactionHash}-${log.logIndex}`;
 
 async function persistEvent(eventObj){
-  // reload db to be safe
   db = await readDb();
   db.events = db.events || [];
   if(db.events.find(e => e.id === eventObj.id)) return false;
@@ -110,6 +136,7 @@ function parsedArgsToObject(args){
   return out;
 }
 
+// decode + persist logs
 async function handleLogs(logs, subId){
   if(!logs || logs.length === 0) return;
   db = await readDb();
@@ -143,10 +170,12 @@ async function handleLogs(logs, subId){
   }
 }
 
+// subscription management
 const managers = new Map();
 
 async function startSubscription(sub){
   if(managers.has(sub.id)) return;
+
   let topics = [];
   if(sub.eventSignature){
     topics.push(ethers.utils.id(sub.eventSignature));
@@ -192,7 +221,7 @@ async function startSubscription(sub){
     if(stored){ stored.lastProcessedBlock = latest; await writeDb(db); }
   }
 
-  // realtime listener
+  // realtime listener (works if provider supports .on)
   const onLog = async (log) => {
     await handleLogs([log], sub.id);
     db = await readDb();
@@ -206,8 +235,13 @@ async function startSubscription(sub){
   };
 
   try {
-    provider.on(filterBase, onLog);
-    managers.set(sub.id, { filter: filterBase, onLog });
+    if (typeof provider.on === 'function') {
+      provider.on(filterBase, onLog);
+      managers.set(sub.id, { filter: filterBase, onLog });
+      console.log('Realtime listener started for', sub.contractAddress, 'topics', topics);
+    } else {
+      console.warn('Provider does not support realtime .on for filters; realtime disabled for', sub.id);
+    }
   } catch(e){
     console.warn('provider.on failed or not supported:', e.message || e);
   }
@@ -215,23 +249,28 @@ async function startSubscription(sub){
 
 // REST endpoints
 app.post('/subscribe', async (req, res) => {
-  const { contractAddress, abi, eventSignature, eventName, fromBlock } = req.body;
-  if(!contractAddress) return res.status(400).json({ error: 'contractAddress required' });
-  const id = uuidv4();
-  db = await readDb();
-  const entry = {
-    id,
-    contractAddress,
-    abi: abi || null,
-    eventSignature: eventSignature || null,
-    eventName: eventName || null,
-    fromBlock: (fromBlock !== undefined && fromBlock !== null) ? Number(fromBlock) : null,
-    lastProcessedBlock: null
-  };
-  db.subscriptions.push(entry);
-  await writeDb(db);
-  startSubscription(entry).catch(console.error);
-  res.json({ id });
+  try {
+    const { contractAddress, abi, eventSignature, eventName, fromBlock } = req.body;
+    if(!contractAddress) return res.status(400).json({ error: 'contractAddress required' });
+    const id = uuidv4();
+    db = await readDb();
+    const entry = {
+      id,
+      contractAddress,
+      abi: abi || null,
+      eventSignature: eventSignature || null,
+      eventName: eventName || null,
+      fromBlock: (fromBlock !== undefined && fromBlock !== null) ? Number(fromBlock) : null,
+      lastProcessedBlock: null
+    };
+    db.subscriptions.push(entry);
+    await writeDb(db);
+    startSubscription(entry).catch(console.error);
+    return res.json({ id });
+  } catch(e){
+    console.error('subscribe error', e);
+    return res.status(500).json({ error: String(e) });
+  }
 });
 
 app.get('/subscriptions', async (req, res) => {
@@ -244,13 +283,31 @@ app.get('/events', async (req, res) => {
   res.json(db.events || []);
 });
 
+// optional: trigger rescan for a subscription id
+app.post('/rescan/:id', async (req, res) => {
+  const id = req.params.id;
+  db = await readDb();
+  const sub = db.subscriptions.find(s => s.id === id);
+  if(!sub) return res.status(404).json({ error: 'subscription not found' });
+  // reset lastProcessedBlock to sub.fromBlock or 0, then start subscription
+  sub.lastProcessedBlock = (sub.fromBlock !== undefined && sub.fromBlock !== null) ? sub.fromBlock : 0;
+  await writeDb(db);
+  startSubscription(sub).catch(console.error);
+  res.json({ ok: true });
+});
+
 // serve static files one folder up (if your html lives there)
 app.use(express.static(path.join(__dirname, '..')));
 
+// socket.io connection
 io.on('connection', socket => {
   console.log('socket connected', socket.id);
+  socket.on('disconnect', () => {
+    // nothing special
+  });
 });
 
+// resume subscriptions on startup
 (async function resumeAll(){
   try {
     db = await readDb();
