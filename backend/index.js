@@ -1,15 +1,3 @@
-// backend/index.js
-// Minimal Ethereum Event Scanner backend using plain JSON file persistence.
-//
-// Dependencies:
-//   npm install express cors ethers socket.io uuid
-//
-// Usage:
-//   Set env vars if needed:
-//     WS_PROVIDER (e.g. ws://127.0.0.1:7546)
-//     HTTP_PROVIDER (e.g. http://127.0.0.1:7546)
-//   node index.js
-
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -22,7 +10,6 @@ const fsSync = require('fs');
 
 const DB_PATH = path.join(__dirname, 'db.json');
 
-// --- DB helpers (ensure file exists, read/write) ---
 async function ensureDb(){
   try {
     if(!fsSync.existsSync(DB_PATH)){
@@ -60,13 +47,13 @@ async function writeDb(obj){
   await fs.writeFile(DB_PATH, JSON.stringify(obj, null, 2), 'utf8');
 }
 
-// initialize DB memory
+
 let db = { subscriptions: [], events: [] };
 (async function initDbNow(){
   db = await ensureDb();
 })();
 
-// --- App setup ---
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -74,7 +61,7 @@ app.use(express.json());
 const server = http.createServer(app);
 const io = socketio(server, { cors: { origin: '*' } });
 
-// --- Provider init (safe) ---
+
 const HTTP_URL = process.env.HTTP_PROVIDER || 'http://127.0.0.1:7546';
 const WS_URL = process.env.WS_PROVIDER || 'ws://127.0.0.1:7546';
 
@@ -270,6 +257,59 @@ app.post('/subscribe', async (req, res) => {
   } catch(e){
     console.error('subscribe error', e);
     return res.status(500).json({ error: String(e) });
+  }
+});
+
+
+const fsnode = require('fs');
+const readArtifacts = async () => {
+  const possiblePaths = [
+    path.join(__dirname, '..', 'build', 'contracts'),     // truffle
+    path.join(__dirname, '..', 'artifacts', 'contracts')  // hardhat
+  ];
+  const result = [];
+  for (const p of possiblePaths) {
+    try {
+      if (!fsnode.existsSync(p)) continue;
+      const files = fsnode.readdirSync(p).filter(f => f.endsWith('.json'));
+      for (const f of files) {
+        try {
+          const raw = fsnode.readFileSync(path.join(p, f), 'utf8');
+          const json = JSON.parse(raw);
+          const name = json.contractName || json.contract_name || path.basename(f, '.json');
+          // For Truffle artifacts, networks.{id}.address; for Hardhat, check 'networks' or 'deployment'
+          const networks = json.networks || json.networks || {};
+          // build a map of networkId -> address
+          const addresses = {};
+          if (json.networks && typeof json.networks === 'object') {
+            for (const nid of Object.keys(json.networks)) {
+              if (json.networks[nid] && json.networks[nid].address) addresses[nid] = json.networks[nid].address;
+            }
+          }
+          // Hardhat / other formats may include `deployments` or `networks` inside
+          // fallback: if json.address exists (single address) use it as 'unknown'
+          if (json.address && Object.keys(addresses).length === 0) {
+            addresses['unknown'] = json.address;
+          }
+          result.push({ name, file: f, abi: json.abi || null, addresses });
+        } catch(e){
+          console.warn('artifact parse error', f, e && e.message);
+        }
+      }
+    } catch(e) {
+      // ignore path not found
+    }
+  }
+  return result;
+};
+
+app.get('/artifacts', async (req, res) => {
+  try {
+    const artifacts = await readArtifacts();
+    res.json(artifacts);
+  } catch (e) {
+    console.error('artifacts error', e);
+    res.status(500).json({ error: 'failed to read artifacts' });
   }
 });
 

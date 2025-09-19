@@ -1,29 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="stylesheet" href="style.css">
   <meta charset="utf-8" />
-  <title>Subscribe to Events</title>
+  <title>Subscribe & ERC20 Transfer</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin:0; background:#f3f4f6; color:#0f172a; }
-    header.navbar { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#0f172a; color:#fff; }
-    header.navbar .logo { font-weight:700; }
-    header.navbar nav a { color:#cbd5e1; margin-left:12px; text-decoration:none; }
-    main { max-width:980px; margin:24px auto; padding:0 16px; }
-    .card { background:#fff; border-radius:8px; padding:18px; box-shadow:0 6px 18px rgba(12,12,12,0.06); }
-    label { display:block; margin-top:10px; font-weight:600; }
-    input[type=text], input[type=number], textarea { width:100%; padding:8px; border-radius:6px; border:1px solid #e5e7eb; margin-top:6px; box-sizing:border-box; }
-    textarea { min-height:120px; font-family:monospace; font-size:13px; }
-    .btn { background:#0ea5e9; color:#fff; padding:10px 14px; border-radius:6px; border:0; cursor:pointer; margin-top:12px; }
-    .status { margin-top:8px; color:#065f46; }
-    .error { color:#b91c1c; }
-    .subscriptions { margin-top:18px; border-top:1px dashed #e6eef5; padding-top:12px; }
-    .sub-item { padding:8px 6px; border-bottom:1px solid #f1f5f9; }
-    .small { font-size:13px; color:#475569; }
-    .help { font-size:13px; color:#64748b; margin-top:6px; }
-    a.link { color:#0ea5e9; text-decoration:none; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="navbar">
@@ -35,103 +16,216 @@
     </nav>
   </header>
 
-  <main>
+  <main class="container">
     <div class="card">
-      <h2>Subscribe to Smart Contract Events</h2>
+      <h2>ERC-20 Transfer & Subscribe (auto address)</h2>
 
-      <form id="subscribeForm">
-        <label for="contractAddress">Contract Address</label>
-        <input id="contractAddress" type="text" placeholder="0x123...">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+        <button id="connectWallet" class="btn">Connect Wallet</button>
+        <div id="walletInfo" class="small">Not connected</div>
 
-        <label for="eventSignature">Event Signature (optional)</label>
-        <input id="eventSignature" type="text" placeholder="Transfer(address,address,uint256) or Ping(address,string)">
+        <select id="artifactSelect" style="margin-left:auto;padding:8px;border-radius:8px;border:1px solid #e6eef5;">
+          <option value="">Loading artifacts…</option>
+        </select>
+        <button id="refreshArtifacts" class="btn" style="background:#94a3b8;margin-left:8px">Refresh</button>
+      </div>
 
-        <label for="fromBlock">From Block (optional)</label>
-        <input id="fromBlock" type="number" placeholder="0 (scan from genesis) or leave empty">
+      <div id="artifactDetails" class="small" style="margin-bottom:12px">Choose a contract artifact with a deployed address (build/contracts/*.json).</div>
 
-        <label for="abiText">ABI (optional) — paste JSON ABI to enable decoding of events</label>
-        <textarea id="abiText" placeholder='[ { "anonymous":false, "inputs":[...], "name":"Ping", "type":"event" }, ... ]'></textarea>
+      <div id="ercBlock" style="display:none">
+        <label for="recipient">Recipient address</label>
+        <input id="recipient" type="text" placeholder="0xabc...">
 
-        <button class="btn" id="startBtn" type="submit">Start Subscription</button>
-      </form>
+        <label for="amount">Amount (human units)</label>
+        <input id="amount" type="text" placeholder="1.5">
 
-      <div id="status" class="status">Subscription status will appear here.</div>
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <button id="sendBtn" class="btn">Send Transfer</button>
+          <button id="subscribeBtn" class="btn secondary">Subscribe to Transfer events</button>
+          <div id="status" class="small" style="margin-left:12px;color:#475569"></div>
+        </div>
+      </div>
 
-      <div class="subscriptions" id="subscriptionsBlock">
+      <div class="subscriptions" style="margin-top:18px">
         <h3>Existing Subscriptions</h3>
         <div id="subsList" class="small">Loading...</div>
       </div>
-
-      <p class="help">How to use: paste the deployed contract address (deployed to Ganache). If you paste the ABI, the backend will decode event arguments. If you only supply an event signature, the scanner will filter by topic0 but cannot decode arguments.</p>
     </div>
   </main>
 
-  <footer style="text-align:center;padding:14px;color:#64748b;">&copy; 2025 Ethereum Event Scanner</footer>
+  <footer>
+    &copy; 2025 Ethereum Event Scanner
+  </footer>
 
-  <!-- Ethers (only used client-side for simple validation) -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script>
+  (function(){
     const API_BASE = 'http://localhost:4000';
-    const form = document.getElementById('subscribeForm');
+    const connectBtn = document.getElementById('connectWallet');
+    const walletInfo = document.getElementById('walletInfo');
+    const artifactSelect = document.getElementById('artifactSelect');
+    const refreshArtifactsBtn = document.getElementById('refreshArtifacts');
+    const artifactDetails = document.getElementById('artifactDetails');
+    const ercBlock = document.getElementById('ercBlock');
+    const recipientInput = document.getElementById('recipient');
+    const amountInput = document.getElementById('amount');
+    const sendBtn = document.getElementById('sendBtn');
+    const subscribeBtn = document.getElementById('subscribeBtn');
     const status = document.getElementById('status');
     const subsList = document.getElementById('subsList');
 
+    let provider, signer, currentAccount;
+    let artifacts = [];
+    let selectedArtifact = null;
+    let selectedAddress = '';
+
+    // Connect MetaMask
+    async function connectWallet(){
+      if(!window.ethereum){ walletInfo.textContent = 'No MetaMask'; return; }
+      provider = new ethers.providers.Web3Provider(window.ethereum, 'any');
+      try {
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        currentAccount = await signer.getAddress();
+        const net = await provider.getNetwork();
+        walletInfo.textContent = `Account: ${currentAccount.slice(0,10)}…  Chain:${net.chainId}`;
+      } catch(e){
+        console.error(e);
+        walletInfo.textContent = 'Wallet connect failed';
+      }
+    }
+    connectBtn.addEventListener('click', connectWallet);
+
+    // Load artifacts
+    async function loadArtifacts(){
+      artifactSelect.innerHTML = '<option>Loading…</option>';
+      try {
+        const r = await fetch(API_BASE + '/artifacts');
+        const list = await r.json();
+        artifacts = list || [];
+        artifactSelect.innerHTML = '<option value="">— select contract —</option>';
+        artifacts.forEach((a, idx) => {
+          const first = (a.addresses && Object.keys(a.addresses).length>0) ? Object.values(a.addresses)[0] : '';
+          const label = `${a.name}${first ? ' — ' + first : ''}`;
+          artifactSelect.appendChild(new Option(label, idx));
+        });
+        artifactSelect.appendChild(new Option('— Manual / no artifact —','-1'));
+      } catch(e){
+        artifactSelect.innerHTML = '<option>Failed to load</option>';
+        console.error(e);
+      }
+    }
+    refreshArtifactsBtn.addEventListener('click', loadArtifacts);
+    loadArtifacts();
+
+    // populate subscriptions
     async function refreshSubscriptions(){
       try {
         const r = await fetch(API_BASE + '/subscriptions');
-        const json = await r.json();
-        if(!Array.isArray(json) || json.length===0){
-          subsList.innerHTML = '<div class="small">No subscriptions yet.</div>';
-          return;
-        }
+        const j = await r.json();
         subsList.innerHTML = '';
-        json.forEach(s=>{
-          const d = document.createElement('div');
-          d.className = 'sub-item';
-          d.innerHTML = `<div><strong>Address:</strong> ${s.contractAddress}</div>
-                         <div class="small"><strong>ID:</strong> ${s.id} &nbsp; <strong>lastBlock:</strong> ${s.lastProcessedBlock ?? 'N/A'}</div>`;
+        if(!j || j.length===0){ subsList.innerHTML = '<div class="small">No subscriptions.</div>'; return; }
+        j.forEach(s=>{
+          const d = document.createElement('div'); d.className='sub-item';
+          d.innerHTML = `<div><strong>${s.contractAddress}</strong></div><div class="small">id: ${s.id} lastBlock: ${s.lastProcessedBlock ?? 'N/A'}</div>`;
           subsList.appendChild(d);
         });
-      } catch(err){
-        subsList.innerHTML = '<div class="error">Failed to load subscriptions: '+err.message+'</div>';
+      } catch(e){
+        subsList.innerHTML = '<div class="small">Failed to load subscriptions</div>';
       }
     }
+    refreshSubscriptions();
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      status.classList.remove('error');
-      status.textContent = 'Creating subscription...';
-      const contractAddress = document.getElementById('contractAddress').value.trim();
-      const eventSignature = document.getElementById('eventSignature').value.trim() || null;
-      const fromBlockRaw = document.getElementById('fromBlock').value.trim();
-      const fromBlock = fromBlockRaw === '' ? null : Number(fromBlockRaw);
-      let abi = null;
-      const abiRaw = document.getElementById('abiText').value.trim();
-      if(abiRaw){
-        try { abi = JSON.parse(abiRaw); }
-        catch(err){ status.classList.add('error'); status.textContent = 'ABI is not valid JSON: ' + err.message; return; }
-      }
-      if(!contractAddress){
-        status.classList.add('error'); status.textContent = 'Contract address is required.'; return;
-      }
-      try {
-        const payload = { contractAddress, eventSignature, fromBlock, abi };
-        const res = await fetch(API_BASE + '/subscribe', {
-          method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if(!res.ok){ status.classList.add('error'); status.textContent = 'Subscribe failed: ' + (data.error || JSON.stringify(data)); return; }
-        status.textContent = 'Subscribed! ID: ' + (data.id || 'unknown') + '. Go to Events page to view results.';
-        // refresh subs
-        await refreshSubscriptions();
-      } catch(err){
-        status.classList.add('error');
-        status.textContent = 'Failed to fetch backend: ' + err.message;
+    // helper: detect ERC20 by ABI
+    function isERC20(abi){
+      if(!abi) return false;
+      const names = abi.filter(x=>x.type==='function').map(f=>f.name);
+      return names.includes('transfer') && names.includes('decimals');
+    }
+
+    artifactSelect.addEventListener('change', (ev) => {
+      const val = artifactSelect.value;
+      selectedArtifact = null;
+      selectedAddress = '';
+      ercBlock.style.display = 'none';
+      artifactDetails.textContent = '';
+      if(!val) return;
+      if(val === '-1'){ artifactDetails.textContent = 'Manual mode selected. You must provide artifact JSON or use another UI.'; return; }
+      const art = artifacts[Number(val)];
+      selectedArtifact = art;
+      // prefer chain 1337, else first address
+      const addresses = art.addresses || {};
+      let addr = addresses['1337'] || Object.values(addresses)[0] || '';
+      selectedAddress = addr;
+      // show details
+      artifactDetails.innerHTML = `<strong>${art.name}</strong> ${addr ? ('— ' + addr) : '<em>(no deployed address)</em>'} <div class="small">ABI: ${art.abi ? 'yes' : 'no'}</div>`;
+      // if ERC20 ABI and addr exists, show transfer UI
+      if(art.abi && isERC20(art.abi) && addr){
+        ercBlock.style.display = 'block';
+      } else {
+        ercBlock.style.display = 'none';
       }
     });
 
-    // load on page
-    refreshSubscriptions();
+    // Send transfer (ERC20)
+    sendBtn.addEventListener('click', async () => {
+      try {
+        status.style.color = '#475569';
+        status.textContent = 'Preparing...';
+        if(!signer) await connectWallet();
+        if(!selectedArtifact || !selectedAddress){ status.style.color='red'; status.textContent='Select artifact with deployed address'; return; }
+        const abi = selectedArtifact.abi;
+        if(!isERC20(abi)){ status.style.color='red'; status.textContent='Selected contract is not ERC20 (transfer/decimals missing)'; return; }
+        const contract = new ethers.Contract(selectedAddress, abi, signer);
+        const to = recipientInput.value.trim();
+        if(!ethers.utils.isAddress(to)){ status.style.color='red'; status.textContent='Invalid recipient address'; return; }
+        const human = amountInput.value.trim();
+        if(!human || isNaN(Number(human))){ status.style.color='red'; status.textContent='Invalid amount'; return; }
+        // get decimals
+        let decimals = 18;
+        try {
+          decimals = await contract.decimals();
+          if(decimals && decimals.toNumber) decimals = decimals.toNumber();
+        } catch(e){
+          decimals = 18;
+        }
+        const units = ethers.utils.parseUnits(human, decimals);
+        status.textContent = 'Sending transfer...';
+        const tx = await contract.transfer(to, units);
+        status.textContent = 'Tx sent: ' + tx.hash;
+        await tx.wait();
+        status.style.color='green';
+        status.textContent = 'Transfer mined: ' + tx.hash;
+      } catch(e){
+        console.error(e);
+        status.style.color='red';
+        status.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      }
+    });
+
+    // Subscribe button -> create backend subscription on Transfer event and pass ABI
+    subscribeBtn.addEventListener('click', async () => {
+      try {
+        status.style.color = '#475569'; status.textContent = 'Creating subscription...';
+        if(!selectedArtifact || !selectedAddress){ status.style.color='red'; status.textContent='Select artifact with deployed address'; return; }
+        const payload = {
+          contractAddress: selectedAddress,
+          eventSignature: 'Transfer(address,address,uint256)',
+          abi: selectedArtifact.abi || null,
+          fromBlock: 0
+        };
+        const r = await fetch(API_BASE + '/subscribe', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+        const j = await r.json();
+        if(!r.ok){ status.style.color='red'; status.textContent = 'Subscribe failed: ' + (j.error || JSON.stringify(j)); return; }
+        status.style.color='green'; status.textContent = 'Subscribed id=' + (j.id || 'unknown');
+        await refreshSubscriptions();
+      } catch(e){
+        console.error(e);
+        status.style.color='red'; status.textContent = 'Subscribe error: ' + (e && e.message ? e.message : String(e));
+      }
+    });
+
+  })();
   </script>
 </body>
 </html>
