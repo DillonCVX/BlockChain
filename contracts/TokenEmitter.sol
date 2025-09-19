@@ -36,9 +36,4 @@ contract TokenEmitter {
     function balanceOf(address addr) external view returns(uint256) {
         return balance[addr];
     }
-
-    /// @notice Reset balance for testing purposes
-    function resetBalance(address addr, uint256 amount) external {
-        balance[addr] = amount;
-    }
 }

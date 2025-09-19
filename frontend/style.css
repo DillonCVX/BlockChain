@@ -85,6 +85,14 @@ body {
   color: #4a90e2;
 }
 
+.navbar nav a.logout-link {
+  color: #ef4444;
+}
+
+.navbar nav a.logout-link:hover {
+  color: #dc2626;
+}
+
 /* Hero Section (used on index) */
 .hero {
   text-align: center;
@@ -197,7 +205,14 @@ textarea {
 }
 
 .small { font-size: 13px; color: #64748b; }
-.error { color: #b91c1c; }
+.error {
+  color: #b91c1c;
+  font-weight: bold;
+  background: #fee2e2;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 10px;
+}
 
 /* Subscriptions list */
 .subscriptions { margin-top: 18px; border-top: 1px dashed rgba(15,23,42,0.06); padding-top: 12px; }
